@@ -1,4 +1,5 @@
-def mapViaUnfold[B](f: A => B): Stream[B] =
+
+def mapViaUnfold[A, B](f: A => B): Stream[B] =
   unfold(this) {
     case Cons(h,t) => Some((f(h()), t()))
     case _ => None

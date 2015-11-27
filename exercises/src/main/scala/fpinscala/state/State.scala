@@ -30,32 +30,114 @@ object RNG {
       (f(a), rng2)
     }
 
-  def nonNegativeInt(rng: RNG): (Int, RNG) = ???
+  def nonNegativeInt(rng: RNG): (Int, RNG) =
+  {
+    val (n, rng2) = rng.nextInt
+    if (n < 0)
+      (-(n + 1), rng2)
+    else
+      (n, rng2)
+  }
 
-  def double(rng: RNG): (Double, RNG) = ???
+  def double(rng: RNG): (Double, RNG) =
+  {
+    val (n, rng2) = nonNegativeInt(rng)
 
-  def intDouble(rng: RNG): ((Int,Double), RNG) = ???
+    (n / (Int.MaxValue.toDouble + 1), rng2)
+  }
 
-  def doubleInt(rng: RNG): ((Double,Int), RNG) = ???
+  def doubleWithMap(rng: RNG) : (Double, RNG) =
+    map(nonNegativeInt)((n: Int) => n / (Int.MaxValue.toDouble + 1))(rng)
 
-  def double3(rng: RNG): ((Double,Double,Double), RNG) = ???
+  def intDouble(rng: RNG): ((Int,Double), RNG) =
+  {
+    val (n, rng2) = rng.nextInt
+    val (d, rng3) = double(rng2)
 
-  def ints(count: Int)(rng: RNG): (List[Int], RNG) = ???
+    ((n,d), rng3)
+  }
 
-  def map2[A,B,C](ra: Rand[A], rb: Rand[B])(f: (A, B) => C): Rand[C] = ???
+  def doubleInt(rng: RNG): ((Double,Int), RNG) =
+  {
+    val ((n, d), rng2) = intDouble(rng)
 
-  def sequence[A](fs: List[Rand[A]]): Rand[List[A]] = ???
+    ((d, n), rng2)
+  }
 
-  def flatMap[A,B](f: Rand[A])(g: A => Rand[B]): Rand[B] = ???
+  def double3(rng: RNG): ((Double,Double,Double), RNG) =
+  {
+    val (d1, rng2) = double(rng)
+    val (d2, rng3) = double(rng2)
+    val (d3, rng4) = double(rng3)
+
+    ((d1, d2, d3), rng4)
+  }
+
+  def ints(count: Int)(rng: RNG): (List[Int], RNG) =
+    if (count == 0) (Nil, rng)
+    else
+      {
+        val (n, rng2) = rng.nextInt
+        val lst = ints(count - 1)(rng2)
+
+        (n::lst._1, lst._2)
+      }
+
+  def map2[A,B,C](ra: Rand[A], rb: Rand[B])(f: (A, B) => C): Rand[C] =
+  rng => {
+    val (a, rng2) = ra(rng)
+    val(b, rng3) = rb(rng2)
+
+    (f(a,b), rng3)
+  }
+
+  def sequence[A](fs: List[Rand[A]]): Rand[List[A]] =
+    fs.foldRight(unit(List[A]()))((f, acc) => map2(f, acc)(_ :: _))
+
+  def flatMap[A,B](f: Rand[A])(g: A => Rand[B]): Rand[B] =
+    rng =>
+      {
+        val (a, rng2) = f(rng)
+        g(a)(rng2)
+      }
+
+  def nonNegativeLessThan(n: Int) : Rand[Int] =
+    flatMap(nonNegativeInt) { i =>
+      val mod = i % n
+      if (i + (n - 1) - mod >= 0) unit(mod) else nonNegativeLessThan(n)
+    }
+
+  def mapWithFlatMap[A,B](s: Rand[A])(f: A => B) : Rand[B] =
+    flatMap(s)(a => rng => (f(a), rng))  //could also be written as flatMap(s)(a => unit(f(a))
+
+  def map2WithFlatMap[A,B,C](ra: Rand[A], rb: Rand[B])(f: (A, B) => C) : Rand[C] =
+    flatMap(ra)(a => map (rb)(b => f(a, b)))
 }
 
+object RNGMethods
+{
+  def main(args:Array[String]) : Unit =
+  {
+    //val r = RNG
+    println()
+  }
+}
 case class State[S,+A](run: S => (A, S)) {
+  def unit[S, A](a : A) : State[S, A] =
+    State(s => (a, s))
+
   def map[B](f: A => B): State[S, B] =
-    sys.error("todo")
+    flatMap(a => unit(f(a)))
+
   def map2[B,C](sb: State[S, B])(f: (A, B) => C): State[S, C] =
-    sys.error("todo")
+    flatMap(a => sb.map(b => f(a, b)))
+
   def flatMap[B](f: A => State[S, B]): State[S, B] =
-    sys.error("todo")
+    State(s =>
+    {
+      val (a, s1) = run(s)
+      f(a).run(s1)
+    })
 }
 
 sealed trait Input
@@ -66,5 +148,17 @@ case class Machine(locked: Boolean, candies: Int, coins: Int)
 
 object State {
   type Rand[A] = State[RNG, A]
+
+  def applyInput(m: Machine, i: Input) : Machine =
+    (m, i) match
+    {
+      case (Machine(_,0,_), _) => m
+      case (Machine(false,_,_), Coin) => m
+      case (Machine(true, candies, coins), Coin) => Machine(false, candies, coins + 1)
+      case (Machine(false, candies, coins), Turn) => Machine(true, candies - 1, coins)
+      case (Machine(true, _,_), Turn) => m
+    }
+
   def simulateMachine(inputs: List[Input]): State[Machine, (Int, Int)] = ???
+//    inputs.foldLeft(State(m, (0, 0)))(z, i => applyInput(z, i))
 }
