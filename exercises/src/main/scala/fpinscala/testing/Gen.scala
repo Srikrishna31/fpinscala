@@ -120,6 +120,8 @@ object Prop {
         println(s"+ OK, proved property")
     }
 
+  def forAll[A](as: Gen[A])(f: A => Boolean) : Prop = forAll(as)(f)
+
   def forAll[A](g: SGen[A])(f: A => Boolean) : Prop = forAll(g(_))(f)
 
   val smallInt = Gen.choose(-10, 10)
@@ -128,7 +130,7 @@ object Prop {
       ns =>
         val max  = ns.max
         !ns.exists(_ > max)
-    }
+    })
 
   val sortedProp = forAll(listOf(smallInt))
 
@@ -170,11 +172,11 @@ object Gen {
 
 case class SGen[+A](forSize: Int => Gen[A])
 {
-  def apply(n: Int) : Gen[A] = forSize(n)
+  def apply[A](n: Int) : Gen[A] = forSize(n)
 
-  def map[A, B](f: A => B) : SGen[B] = SGen(forSize(_).map(f))
+  def map[B](f: A => B) : SGen[B] = SGen(forSize(_).map(f))
 
-  def flatMap[A, B](f: A => SGen[B]) : SGen[B] = SGen(n => forSize(n).flatMap((a: A) => f(a).forSize(n)))
+  def flatMap[B](f: A => SGen[B]) : SGen[B] = SGen(n => forSize(n).flatMap((a: A) => f(a).forSize(n)))
 
   //def **[B](s2: Gen[B]): SGen[(A,B)] = SGen(n => apply(n) ** s2(n))
 
