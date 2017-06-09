@@ -1,5 +1,9 @@
 package fpinscala.iomonad
 
+import language.postfixOps
+import language.higherKinds
+import scala.io.StdIn.readLine
+
 object IO0 {
                             /*
 
@@ -368,18 +372,48 @@ object IO3 {
                                f: A => Free[F, B]) extends Free[F, B]
 
   // Exercise 1: Implement the free monad
-  def freeMonad[F[_]]: Monad[({type f[a] = Free[F,a]})#f] = ???
+  def freeMonad[F[_]]: Monad[({type f[a] = Free[F,a]})#f] = new Monad[({type f[a] = Free[F, a]})#f]
+  {
+    override def flatMap[A,B](a:Free[F,A])(f:A => Free[F,B]):Free[F,B] = a flatMap f
+//    override def flatMap[A, B](a: Free[F, A])(f: (A) => Free[F, B]):Free[F,B] = a match
+//    {
+//      case Return(a) => f(a)
+//      case Suspend(s) => flatMap(s)(Return(_))
+//      case FlatMap(s, f) => flatMap(s)(a => f(a))
+//    }
+    override def unit[A](a: => A) = Return(a)
+  }
 
   // Exercise 2: Implement a specialized `Function0` interpreter.
-  // @annotation.tailrec
-  def runTrampoline[A](a: Free[Function0,A]): A = ???
+  @annotation.tailrec
+  def runTrampoline[A](fa: Free[Function0,A]): A = fa match
+  {
+    case Return(a) => a
+    case Suspend(s) => s()
+    case FlatMap(s, k) => s match
+    {
+      case Return(a) => runTrampoline({k(a)})
+      case Suspend(s) => runTrampoline({k(s())})
+      case FlatMap(a0, g) => runTrampoline{a0 flatMap{a => g(a) flatMap k}}
+    }
+  }
 
   // Exercise 3: Implement a `Free` interpreter which works for any `Monad`
-  def run[F[_],A](a: Free[F,A])(implicit F: Monad[F]): F[A] = ???
+  def run[F[_],A](a: Free[F,A])(implicit F: Monad[F]): F[A] = a match
+  {
+    case Return(a) => F.unit(a)
+    case Suspend(r)=> r
+    case FlatMap(Suspend(r), f) => F.flatMap(r)(a=> run(f(a)))
+    case _ => sys.error("Impossible since step takes care of it.")
+  }
 
   // return either a `Suspend`, a `Return`, or a right-associated `FlatMap`
-  // @annotation.tailrec
-  def step[F[_],A](a: Free[F,A]): Free[F,A] = ???
+  @annotation.tailrec
+  def step[F[_],A](a: Free[F,A]): Free[F,A] = a match
+  {
+    case FlatMap(Return(x), f) => step(f(x))
+    case FlatMap(FlatMap(y, g), f) => step(y flatMap(a => f(g(a))))
+  }
 
   /*
   The type constructor `F` lets us control the set of external requests our

@@ -1,5 +1,7 @@
 package fpinscala.datastructures
 
+import scala.annotation.tailrec
+
 sealed trait List[+A] // `List` data type, parameterized on a type, `A`
 case object Nil extends List[Nothing] // A `List` data constructor representing the empty list
 /* Another data constructor, representing nonempty lists. Note that `tail` is another `List[A]`,
@@ -52,195 +54,107 @@ object List { // `List` companion object. Contains functions for creating and wo
 
   def tail[A](l: List[A]): List[A] = l match
   {
-      case Nil => Nil
-      case Cons(_, xs) => xs
+    case Nil => Nil  //TODO: Throw an exception here.
+    case Cons(x, xs) => xs
   }
 
   def setHead[A](l: List[A], h: A): List[A] = l match
   {
     case Nil => List(h)
-    case Cons(_, xs) => Cons(h, xs)
+    case _ => Cons(h, l)
+  }
+
+  def drop[A](l: List[A], n: Int): List[A] = l match
+  {
+    case Nil => Nil
+    case Cons(x, xs) => if (n == 0) xs else drop(xs, n - 1)
   }
 
   @annotation.tailrec
-  def drop[A](l: List[A], n: Int): List[A] =
-  l match
+  def dropWhile[A](l: List[A], f: A => Boolean): List[A] = l match
+  {
+    case Cons(x, xs) if(f(x)) =>  dropWhile(xs, f)
+    case _ => l
+
+  }
+
+  def init[A](l: List[A]): List[A] = l match
   {
     case Nil => Nil
-    case Cons(_, xs) => if (n > 0) drop(xs, n - 1) else xs
+    case Cons(x, Nil) => Nil
+    case Cons(x, xs) => Cons(x, init(xs))
   }
+
+  def length[A](l: List[A]): Int = foldRight(l, 0)((_, z) => 1 + z)
 
   @annotation.tailrec
-  def dropWhile[A](l: List[A], f: A => Boolean): List[A] =
-  l match
-  {
-    case Nil => Nil
-    case Cons(x, xs) => if (f(x)) dropWhile(xs, f) else xs
-  }
-
-
-  def init[A](l: List[A]): List[A] =
-  {
-    @annotation.tailrec
-    def loop(curr: List[A], accum: List[A]) : List[A] =
-    curr match
-    {
-      case Nil => accum
-      case Cons(x, Nil) => accum
-      case Cons(x, xs) => loop(xs, append(accum, List(x)) )
-    }
-
-    loop(l, Nil)
-  }
-
-  def length[A](l: List[A]): Int = foldRight(l, 0)((_,acc) => acc + 1 )
-
-  def foldLeft[A,B](l: List[A], z: B)(f: (B, A) => B): B =
-  l match
+  def foldLeft[A,B](l: List[A], z: B)(f: (B, A) => B): B = l match
   {
     case Nil => z
-    case Cons(x, xs) =>foldLeft(xs, f(z,x))(f)
+    case Cons(x, xs) => foldLeft(xs, f(z, x))(f)
   }
 
-  def reverse[A](l : List[A]) : List[A] =
-      foldRight(l, Nil: List[A])((x, xs) => List.append(xs, List(x)))
+  def sumUsingFoldLeft(l: List[Int]) : Int = foldLeft(l, 0)(_+_)
 
-  def append1[A](l1 : List[A], l2: List[A]):List[A] =
-      foldRight(l1, l2)((x, xs) => Cons(x, xs))
+  def productUsingFoldLeft(l: List[Int]): Int = foldLeft(l,1)(_*_)
 
-  def concat[A](l: List[List[A]]) : List[A] =
-      foldRight(l, Nil: List[A])((x, ys) => foldRight(x, ys)((a, as) => Cons(a, as)))
+  def lengthUsingFoldLeft(l: List[Int]) : Int = foldLeft(l, 0)((z,_)=> 1 + z)
 
-  //Not sure of the correctness of the implementation.
-  def foldLeft1[A,B](l: List[A], z: B)(f: (B, A) => B): B =
-    foldRight(l, z)((x, z) => f(z,x))
+  def reverseUsingFoldLeft[A](l: List[A]) : List[A] = foldLeft(l, List[A]())((z, a) => Cons(a, z))
 
-  def map[A,B](l: List[A])(f: A => B): List[B] =
-    foldRight(l, Nil : List[B])((x, xs) => Cons(f(x), xs))
+  def foldLeftUsingFoldRight[A,B](l: List[A], z: B)(f:(B,A) => B) : B = foldRight(l, z)((a, z) => f(z, a))
 
-  def filter[A](l: List[A])(f: A => Boolean) : List[A] =
-    foldRight(l, Nil: List[A])((x, ys) => if (f(x)) Cons(x, ys) else ys)
+  def foldRightUsingFoldLeft[A,B](l: List[A], z: B)(f:(A, B) => B) : B = foldLeft(l, z)((z, a) => f(a, z))
 
-  def flatMap[A,B](as: List[A])(f: A => List[B]) : List[B] =
-    foldRight(as, Nil: List[B])((x, ys) => append(f(x), ys))
+  def appendUsingFoldRight[A](l1: List[A], l2: List[A]) : List[A] = foldRight(l1, l2)(Cons(_,_))
 
-  def filter1[A](l: List[A])(f: A => Boolean) : List[A] =
-    flatMap(l)((x) => if (f(x)) List(x) else Nil)
+  def concatenate[A](l: List[List[A]]) : List[A] = foldLeft(l, List[A]())((z, a) => foldRight(a, z)(Cons(_,_)))
 
-  def zipWith[A, B, C](xs: List[A], ys: List[B])(f: (A, B) => C) : List[C] =
-    (xs, ys) match
-    {
-      case (_, Nil) => Nil
-      case (Nil, _) => Nil
-      case (Cons(x, xrs), Cons(y, yrs)) => Cons(f(x, y), zipWith(xrs, yrs)(f))
-    }
 
-  @annotation.tailrec
-  def hasSubsequence[A](xs: List[A], sub: List[A]) : Boolean =
-    (xs, sub) match
-    {
-      case (Nil, _) => false
-      case (_, Nil) => false
-      case (Cons(y, ys), Cons(s, ss)) => if (y == s)
-                                            if(ss == Nil)
-                                              true
-                                            else
-                                              hasSubsequence(ys, ss)
-                                         else
-                                            hasSubsequence(ys, sub)
-    }
-}
-
-object ListMethods
-{
-  def testListReverse():Unit =
+  def addOne(l: List[Int]) : List[Int] = l match
   {
-    val l = List(1,2,3,4)
-    println("Reverse of list : " + l.toString() + "is : " + List.reverse(l))
+    case Nil => Nil
+    case Cons(x, xs) => Cons(x + 1, addOne(xs))
   }
 
-  def testFoldLeft() : Unit =
+  def doubleToString(l: List[Double]) : List[String] = l match
   {
-    val l = List(1,2,3,4,5)
-    println("Sum of : " + l.toString() + "is: " + List.foldLeft(l, 0)((acc, x) => acc + x))
+    case Nil => Nil
+    case Cons(x, xs) => Cons(x.toString, doubleToString(xs))
   }
 
-  def testAppend1(): Unit =
-  {
-    val l1 = List(1,2,3,4)
-    val l2 = List(5,6,7,8)
+  def map[A,B](l: List[A])(f: A => B): List[B] = foldRight(l, List[B]())((a, z) => Cons(f(a), z))
 
-    println("Result of append of " + l1.toString() + " and " + l2.toString() + " is: " + List.append1(l1, l2))
+  def filter[A](as: List[A])(f: A => Boolean): List[A] = foldLeft(as, List[A]())((z, a) => if (f(a)) Cons(a, z) else z)
+
+  def flatMap[A,B](as: List[A])(f: A => List[B]): List[B] = foldLeft(as, List[B]())((z, a) => foldLeft(f(a), z)((z1, a1) => Cons(a1, z1)))
+
+  def filterWithFlatMap[A](as: List[A])(f: A => Boolean): List[A] = flatMap(as)(a => if (f(a)) List(a) else Nil)
+
+  def combine(l1: List[Int], l2: List[Int])(f: (Int, Int) => Int) : List[Int] = (l1, l2) match
+  {
+    case (_, Nil) => Nil
+    case (Nil, _) => Nil
+    case (Cons(h1, t1), Cons(h2, t2)) => Cons(f(h1, h2), combine(t1, t2)(f))
   }
 
-  def testConcat(): Unit =
+  def zipWith[A, B, C](l1: List[A], l2: List[B])(f: (A, B) => C) : List[C] = (l1, l2) match
   {
-    val l = List(List(1,2,3,4),
-                 List(5,6,7,8),
-                 List(9,10,11,12))
-
-    println("Result of concat of " + l.toString() + " is: " + List.concat(l))
+    case (_, Nil) => Nil
+    case (Nil, _) => Nil
+    case (Cons(h1, t1), Cons(h2, t2)) => Cons(f(h1, h2), zipWith(t1, t2)(f))
   }
 
-  def testMap(): Unit =
+  def hasSubSequence[A](sup: List[A], sub: List[A]) : Boolean =
   {
-    val l = List(1,2,3,4)
+      @tailrec
+      def internal[A](as: List[A], bs: List[A]) : Boolean = (as, bs) match
+      {
+        case (_, Nil) => true
+        case (Nil, _) => false
+        case (Cons(h1, t1), Cons(h2, t2)) => if (h1 == h2) internal(t1, t2) else internal(t1, sub)
+      }
 
-    println("Result of squaring elements of list: " + l.toString() + " is " + List.map(l)((x) => x * x))
-  }
-
-  def testFilter() : Unit =
-  {
-    val l = List(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-
-    println("Result of filtering odd numbers out of list: " + l.toString() + " is " + List.filter(l)((x) => x % 2 == 0 ))
-  }
-
-  def testFilter1() : Unit =
-  {
-    val l = List(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-
-    println("Result of filtering odd numbers out of list: " + l.toString() + " is " + List.filter1(l)((x) => x % 2 == 0 ))
-  }
-
-  def testZipWith() : Unit =
-  {
-    val l1 = List(1, 2, 3)
-    val l2 = List(4, 5, 6)
-
-    println("Result of adding corresponding elements in lists: " +
-            l1.toString() + " and " + l2.toString() + " is : " +
-            List.zipWith(l1, l2)((_ + _)))
-  }
-
-  def testSubSequence(): Unit =
-  {
-    val l1 = List(1,2,3,4)
-    val l2 = List(2,3)
-    val l3 = List(5,6)
-    println("Result of hasSubSequence of " +
-            l2.toString() +
-            " in " +
-            l1.toString() +
-            " is " + List.hasSubsequence(l1, l2).toString())
-
-    println("Result of hasSubSequence of " +
-      l3.toString() +
-      " in " +
-      l1.toString() +
-      " is " + List.hasSubsequence(l1, l3).toString())
-
-  }
-  def main(args: Array[String]) : Unit =
-  {
-    testListReverse()
-    testFoldLeft()
-    testAppend1()
-    testConcat()
-    testMap()
-    testFilter()
-    testFilter1()
-    testZipWith()
-    testSubSequence()
+    internal(sup, sub)
   }
 }

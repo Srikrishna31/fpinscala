@@ -1,6 +1,7 @@
 package fpinscala.parallelism
 
 import java.util.concurrent._
+import language.implicitConversions
 
 object Par {
   type Par[A] = ExecutorService => Future[A]
@@ -16,14 +17,9 @@ object Par {
     def cancel(evenIfRunning: Boolean): Boolean = false 
   }
 
-  private case class TimedFuture[A](get: A) extends Future[A]
-  {
-    def isDone = ???
-    def timeSpent = ???
-    def get(timeout: Long, units: TimeUnit) = ???
-    def isCancelled = ???
-    def cancel(evenIfRunning: Boolean) : Boolean = ???
-  }
+  def lazyUnit[A](a: => A) : Par[A] = fork(unit(a))
+
+  def asyncF[A, B](f : A => B) : A => Par[B] = a => lazyUnit(f(a))
 
   def map2[A,B,C](a: Par[A], b: Par[B])(f: (A,B) => C): Par[C] = // `map2` doesn't evaluate the call to `f` in a separate logical thread, in accord with our design choice of having `fork` be the sole function in the API for controlling parallelism. We can always do `fork(map2(a,b)(f))` if we want the evaluation of `f` to occur in a separate thread.
     (es: ExecutorService) => {
@@ -31,37 +27,35 @@ object Par {
       val bf = b(es)
       UnitFuture(f(af.get, bf.get)) // This implementation of `map2` does _not_ respect timeouts, and eagerly waits for the returned futures. This means that even if you have passed in "forked" arguments, using this map2 on them will make them wait. It simply passes the `ExecutorService` on to both `Par` values, waits for the results of the Futures `af` and `bf`, applies `f` to them, and wraps them in a `UnitFuture`. In order to respect timeouts, we'd need a new `Future` implementation that records the amount of time spent evaluating `af`, then subtracts that time from the available time allocated for evaluating `bf`.
     }
+
+//  def map3[A,B,C,D](a: Par[A], b: Par[B], c: Par[A])(f: (A,B,C) => D) : Par[D] = map2(a, map2(b, c)((bv,cv)=>(bv,cv)))((a1, b1) => f(a1, b1._1, b1._2))
   
   def fork[A](a: => Par[A]): Par[A] = // This is the simplest and most natural implementation of `fork`, but there are some problems with it--for one, the outer `Callable` will block waiting for the "inner" task to complete. Since this blocking occupies a thread in our thread pool, or whatever resource backs the `ExecutorService`, this implies that we're losing out on some potential parallelism. Essentially, we're using two threads when one should suffice. This is a symptom of a more serious problem with the implementation, and we will discuss this later in the chapter.
     es => es.submit(new Callable[A] { 
       def call = a(es).get
     })
 
-  def lazyUnit[A](a: => A): Par[A] = fork(unit(a))
-
   def map[A,B](pa: Par[A])(f: A => B): Par[B] = 
     map2(pa, unit(()))((a,_) => f(a))
 
-  def asyncF[A, B](f: A=> B): A => Par[B] = a => map(lazyUnit(a))(f)
-
   def sortPar(parList: Par[List[Int]]) = map(parList)(_.sorted)
+
+  def sequence[A](ps: List[Par[A]]) : Par[List[A]] = ps.foldLeft[Par[List[A]]](unit(List()))((z, a) => map2(a, z)(_::_))
+
+  def parMap[A,B](ps: List[A])(f: A => B) : Par[List[B]] = fork {
+    val fbs = ps.map(asyncF(f))
+    sequence(fbs)
+  }
+
+  def parFilter[A](ps: List[A])(f: A => Boolean): Par[List[A]] = fork
+  {
+    val fbs = ps.map(asyncF(a => if (f(a)) List(a) else List()))
+    map(sequence(fbs))(_.flatten)
+  }
 
   def equal[A](e: ExecutorService)(p: Par[A], p2: Par[A]): Boolean = 
     p(e).get == p2(e).get
 
-  //this is a valid implementation, but this is a sequential implementation.
-  def sequence[A](ps: List[Par[A]]) : Par[List[A]] =
-    ps.foldRight[Par[List[A]]](unit(Nil))((pa, z) => map2(pa, z)(_ :: _))
-
-  def parMap[A,B](ps: List[A])(f: A => B): Par[List[B]] = fork {
-    val fbs: List[Par[B]] = ps.map(asyncF(f))
-    sequence(fbs)
-  }
-
-  def parFilter[A](as: List[A])(f: A => Boolean) : Par[List[A]] = {
-    val fbs: List[Par[A]] = as map(aysncF((a: A) => if (f(a)) List(a) else List()))
-    map(sequence(fbs))(_.flatten)
-  }
   def delay[A](fa: => Par[A]): Par[A] = 
     es => fa(es)
 
@@ -70,10 +64,51 @@ object Par {
       if (run(es)(cond).get) t(es) // Notice we are blocking on the result of `cond`.
       else f(es)
 
+  def choiceN[A](n: Par[Int])(choices: List[Par[A]]) : Par[A] = es =>
+  {
+    val index = run(es)(n).get
+    choices(index)(es)
+  }
+
+  def choiceMap[K,V](key: Par[K])(choices: Map[K, Par[V]]) : Par[V] = es =>
+  {
+    val k = run(es)(key).get
+    choices(k)(es)
+  }
+
+  def choiceWithChoiceN[A](cond: Par[Boolean])(t: Par[A], f: Par[A]) = choiceN(map(cond)(if (_) 0 else 1))(List(t, f))
+
+  def chooser[A,B](pa: Par[A])(choices: A => Par[B]) : Par[B] = es =>
+  {
+    val a = run(es)(pa).get
+    choices(a)(es)
+  }
+
+  def choiceWithChooser[A](cond: Par[Boolean])(t: Par[A], f: Par[A]) : Par[A] = chooser(cond)(if (_) t else f)
+
+  def choiceNWithChooser[A](n: Par[Int])(choices: List[Par[A]]) : Par[A] = chooser(n)(choices(_))
+
+  def join[A](a: Par[Par[A]]) : Par[A] = es =>
+  {
+    val ev = run(es)(a).get
+    ev(es)
+  }
+
+  def flatMap[A,B](a: Par[A])(f: A => Par[B]) : Par[B] = es =>
+  {
+    val ev = run(es)(a).get
+    f(ev)(es)
+  }
+
+  def flatMapWithJoin[A,B](a: Par[A])(f: A => Par[B]) : Par[B] = join(map(a)(f))
+
+  def joinWithFlatMap[A](a: Par[Par[A]]) : Par[A] = flatMap(a)(b => b)
+
   /* Gives us infix syntax for `Par`. */
   implicit def toParOps[A](p: Par[A]): ParOps[A] = new ParOps(p)
 
   class ParOps[A](p: Par[A]) {
+
 
   }
 }
