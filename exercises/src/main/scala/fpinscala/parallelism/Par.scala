@@ -15,7 +15,16 @@ object Par {
     def isCancelled = false 
     def cancel(evenIfRunning: Boolean): Boolean = false 
   }
-  
+
+  private case class TimedFuture[A](get: A) extends Future[A]
+  {
+    def isDone = ???
+    def timeSpent = ???
+    def get(timeout: Long, units: TimeUnit) = ???
+    def isCancelled = ???
+    def cancel(evenIfRunning: Boolean) : Boolean = ???
+  }
+
   def map2[A,B,C](a: Par[A], b: Par[B])(f: (A,B) => C): Par[C] = // `map2` doesn't evaluate the call to `f` in a separate logical thread, in accord with our design choice of having `fork` be the sole function in the API for controlling parallelism. We can always do `fork(map2(a,b)(f))` if we want the evaluation of `f` to occur in a separate thread.
     (es: ExecutorService) => {
       val af = a(es) 
@@ -28,14 +37,31 @@ object Par {
       def call = a(es).get
     })
 
+  def lazyUnit[A](a: => A): Par[A] = fork(unit(a))
+
   def map[A,B](pa: Par[A])(f: A => B): Par[B] = 
     map2(pa, unit(()))((a,_) => f(a))
+
+  def asyncF[A, B](f: A=> B): A => Par[B] = a => map(lazyUnit(a))(f)
 
   def sortPar(parList: Par[List[Int]]) = map(parList)(_.sorted)
 
   def equal[A](e: ExecutorService)(p: Par[A], p2: Par[A]): Boolean = 
     p(e).get == p2(e).get
 
+  //this is a valid implementation, but this is a sequential implementation.
+  def sequence[A](ps: List[Par[A]]) : Par[List[A]] =
+    ps.foldRight[Par[List[A]]](unit(Nil))((pa, z) => map2(pa, z)(_ :: _))
+
+  def parMap[A,B](ps: List[A])(f: A => B): Par[List[B]] = fork {
+    val fbs: List[Par[B]] = ps.map(asyncF(f))
+    sequence(fbs)
+  }
+
+  def parFilter[A](as: List[A])(f: A => Boolean) : Par[List[A]] = {
+    val fbs: List[Par[A]] = as map(aysncF((a: A) => if (f(a)) List(a) else List()))
+    map(sequence(fbs))(_.flatten)
+  }
   def delay[A](fa: => Par[A]): Par[A] = 
     es => fa(es)
 
@@ -48,7 +74,6 @@ object Par {
   implicit def toParOps[A](p: Par[A]): ParOps[A] = new ParOps(p)
 
   class ParOps[A](p: Par[A]) {
-
 
   }
 }

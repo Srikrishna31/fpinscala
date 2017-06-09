@@ -152,13 +152,15 @@ object State {
   def applyInput(m: Machine, i: Input) : Machine =
     (m, i) match
     {
-      case (Machine(_,0,_), _) => m
-      case (Machine(false,_,_), Coin) => m
-      case (Machine(true, candies, coins), Coin) => Machine(false, candies, coins + 1)
-      case (Machine(false, candies, coins), Turn) => Machine(true, candies - 1, coins)
-      case (Machine(true, _,_), Turn) => m
+      case (Machine(_,0,_), _) => m //if there are no candies do nothing
+      case (Machine(false,_,_), Coin) => m //if the machine is unlocked, do nothing on more coins.
+      case (Machine(true, candies, coins), Coin) => Machine(false, candies, coins + 1) //unlock the machine on coin input, update the coins count
+      case (Machine(false, candies, coins), Turn) => Machine(true, candies - 1, coins) //dispense the candy on turn, and lock it back
+      case (Machine(true, _,_), Turn) => m //if the machine is locked, do nothing on Turn.
     }
 
-  def simulateMachine(inputs: List[Input]): State[Machine, (Int, Int)] = ???
-//    inputs.foldLeft(State(m, (0, 0)))(z, i => applyInput(z, i))
+  def simulateMachine(inputs: List[Input]): State[Machine, (Int, Int)] =
+    State(m: Machine =>
+      val m1 = inputs.foldLeft(m)((z, i) => z applyInput i)
+      (m1, (m1.coins, m1.candies)))
 }
